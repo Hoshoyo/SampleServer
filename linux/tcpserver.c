@@ -1,4 +1,4 @@
-#include <windows.h>
+#include <pthread.h>
 #include <stdio.h>
 #include "../network.h"
 
@@ -7,7 +7,7 @@ static TCP_Connection clients[MAX_CLIENTS];
 static int client_index;
 static int running;
 
-unsigned int WINAPI receive_thread(void* lpParameter)
+void* receive_thread(void* param)
 {
     while(running)
     {
@@ -27,17 +27,18 @@ unsigned int WINAPI receive_thread(void* lpParameter)
                 }
             }
         }
-        Sleep(10);
+        usleep(10000);
     }
 
     return 0;
 }
 
 // windows only
-void create_receive_thread()
+pthread_t create_receive_thread()
 {
-    unsigned int thread_id = 0;
-    HANDLE recv_thread = CreateThread(0, 0, receive_thread, 0, 0, &thread_id);
+    pthread_t thread_id = {0};
+    pthread_create(&thread_id, 0, receive_thread, 0);
+    return thread_id;
 }
 
 int main()
@@ -48,7 +49,7 @@ int main()
         if(network_create_tcp_bound_socket(&listen_conn, 8888, 0) != NETWORK_OK)
             return -1;
 
-        create_receive_thread();
+        pthread_t rthread = create_receive_thread();
 
         running = 1;
 
@@ -70,6 +71,8 @@ int main()
                 return -1;
             }
         }
+        pthread_join(rthread, 0);
     }
+
     return 0;
 }

@@ -39,6 +39,13 @@ typedef struct {
 	unsigned int flags;
 } UDP_Connection;
 
+typedef struct {
+	int          socket;
+	unsigned int port;
+	unsigned int flags;
+	struct sockaddr_in addr;
+} TCP_Connection;
+
 #endif
 
 #define PACKET_SIZE 2048

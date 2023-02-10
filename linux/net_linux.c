@@ -95,7 +95,7 @@ network_create_udp_bound_socket(UDP_Connection* out_conn, unsigned short port, i
         close(connection_socket);
         return -1;
     }
-    fprintf(net_log_stream"successfully bound udp socket to port %d\n", port);
+    fprintf(net_log_stream, "successfully bound udp socket to port %d\n", port);
     if (out_conn)
     {
         out_conn->socket = connection_socket;
@@ -107,8 +107,8 @@ network_create_udp_bound_socket(UDP_Connection* out_conn, unsigned short port, i
 Net_Status
 network_receive_udp_packets_from_peer(UDP_Connection* udp_conn, struct sockaddr_in* peer, UDP_Packet* out_packet)
 {
-    int len = sizeof(out_packet->buffer);
-    int n = recvfrom(udp_conn->socket, (char*)out_packet->buffer, len,
+    int len = sizeof(out_packet->data);
+    int n = recvfrom(udp_conn->socket, (char*)out_packet->data, len,
         (udp_conn->flags & NETWORK_FLAG_SOCKET_ASYNC) ? MSG_DONTWAIT : 0, (struct sockaddr*)peer, &len);
 
     switch (n)
@@ -120,11 +120,11 @@ network_receive_udp_packets_from_peer(UDP_Connection* udp_conn, struct sockaddr_
             if (udp_conn->flags & NETWORK_FLAG_SOCKET_ASYNC)
                 return NETWORK_PACKET_NONE;
             else
-                return NETWORK_TIMEOUT;
+                return NETWORK_CONN_TIMEOUT;
         }
         else return NETWORK_PACKET_ERROR;
     } break;
-    case 0:  return NETWORK_SHUTDOWN;
+    case 0:  return NETWORK_FORCED_SHUTDOWN;
     default: {
         out_packet->length_bytes = n;
         return n;
@@ -142,8 +142,8 @@ network_receive_udp_packets_from_addr(UDP_Connection* udp_conn, const char* ip, 
     servaddr.sin_port = htons(port);
     inet_pton(AF_INET, ip, &servaddr.sin_addr.s_addr);
 
-    int len = sizeof(out_packet->buffer);
-    int n = recvfrom(udp_conn->socket, (char*)out_packet->buffer, len,
+    int len = sizeof(out_packet->data);
+    int n = recvfrom(udp_conn->socket, (char*)out_packet->data, len,
         (udp_conn->flags & NETWORK_FLAG_SOCKET_ASYNC) ? MSG_DONTWAIT : 0, (struct sockaddr*)&servaddr, &len);
 
     switch (n)
@@ -155,11 +155,11 @@ network_receive_udp_packets_from_addr(UDP_Connection* udp_conn, const char* ip, 
             if (udp_conn->flags & NETWORK_FLAG_SOCKET_ASYNC)
                 return NETWORK_PACKET_NONE;
             else
-                return NETWORK_TIMEOUT;
+                return NETWORK_CONN_TIMEOUT;
         }
         else return NETWORK_PACKET_ERROR;
     } break;
-    case 0:  return NETWORK_SHUTDOWN;
+    case 0:  return NETWORK_FORCED_SHUTDOWN;
     default: return n;
     }
 }
@@ -190,19 +190,19 @@ network_receive_udp_packets(UDP_Connection* udp_conn, UDP_Packet* out_packet)
             if (udp_conn->flags & NETWORK_FLAG_SOCKET_ASYNC)
                 return NETWORK_PACKET_NONE;
             else
-                return NETWORK_TIMEOUT;
+                return NETWORK_CONN_TIMEOUT;
         }
         else return NETWORK_PACKET_ERROR;
     } break;
-    case 0:  return NETWORK_SHUTDOWN;
+    case 0:  return NETWORK_FORCED_SHUTDOWN;
     default: {
         #if 0
         printf("received message(%d bytes) from %s:%d\n", status, inet_ntoa(client_info.sin_addr), ntohs(client_info.sin_port));
         #endif
-        out_packet->client_info = client_info;
+        out_packet->sender_info = client_info;
         out_packet->length_bytes = status;
-        memcpy(out_packet->buffer, buffer, out_packet->length_bytes);
-        out_packet->buffer[out_packet->length_bytes] = 0;
+        memcpy(out_packet->data, buffer, out_packet->length_bytes);
+        out_packet->data[out_packet->length_bytes] = 0;
         return out_packet->length_bytes;
     } break;
     }
@@ -232,10 +232,8 @@ network_print_port(unsigned short port)
     fprintf(net_log_stream, "%d", (port >> 8) | ((port & 0xff) << 8));
 }
 
-// 255.255.255.255
-// requires out_ip to be 15 bytes long at least
 int
-network_dns_ipv4(const char* server_addr, char* out_ip)
+network_dns_ipv4(const char* server_addr, ipv4_t* out_ip)
 {
     struct sockaddr_in result = { 0 };
     struct hostent* h = gethostbyname(server_addr);
@@ -247,8 +245,7 @@ network_dns_ipv4(const char* server_addr, char* out_ip)
     char** aux = h->h_addr_list;
     if (*aux)
     {
-        unsigned int ip = *(unsigned int*)*aux;
-        sprintf(out_ip, "%d.%d.%d.%d", (ip & 0xff), ((ip & 0xff00) >> 8), ((ip & 0xff0000) >> 16), ((ip & 0xff000000) >> 24));
+        *out_ip = *(unsigned int*)*aux;
     }
     return 0;
 }
@@ -276,10 +273,10 @@ network_addr_equal(struct sockaddr_in* a1, struct sockaddr_in* a2)
 int 
 network_create_tcp_socket(TCP_Connection* out_conn, int async)
 {
-    SOCKET connection_socket = 0;
-    if ((connection_socket = socket(AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET)
+    int connection_socket = 0;
+    if ((connection_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1)
     {
-        fprintf(net_log_stream, "Failed to create tcp socket: %s", strerror(errno));
+        fprintf(net_log_stream, "Failed to create tcp socket: %s\n", strerror(errno));
         return -1;
     }
 
@@ -299,10 +296,10 @@ int
 network_create_tcp_bound_socket(TCP_Connection* out_conn, unsigned short port, int async)
 {
     // create
-    SOCKET connection_socket = 0;
-    if ((connection_socket = socket(AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET)
+    int connection_socket = 0;
+    if ((connection_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1)
     {
-        fprintf(net_log_stream, "Failed to create tcp socket: %s", strerror(errno));
+        fprintf(net_log_stream, "Failed to create tcp socket: %s\n", strerror(errno));
         return -1;
     }
     out_conn->socket = connection_socket;
@@ -312,7 +309,7 @@ network_create_tcp_bound_socket(TCP_Connection* out_conn, unsigned short port, i
         if (network_socket_set_async((UDP_Connection*)out_conn) == -1) return -1;
     }
 
-    fprintf(net_log_stream, "Created net tcp socket (%s) bound to %d", (async) ? "async" : "blocking", port);
+    fprintf(net_log_stream, "Created net tcp socket (%s) bound to %d\n", (async) ? "async" : "blocking", port);
 
     // bind it to port
     struct sockaddr_in server_info = { 0 };
@@ -320,14 +317,14 @@ network_create_tcp_bound_socket(TCP_Connection* out_conn, unsigned short port, i
     server_info.sin_addr.s_addr = INADDR_ANY;
     server_info.sin_port = htons(port);
 
-    if (bind(connection_socket, (struct sockaddr*)&server_info, sizeof(server_info)) == SOCKET_ERROR)
+    if (bind(connection_socket, (struct sockaddr*)&server_info, sizeof(server_info)) == -1)
     {
-        fprintf(net_log_stream, "Failed to bind socket to port %d: %s", port, strerror(errno));
-        closesocket(connection_socket);
+        fprintf(net_log_stream, "Failed to bind socket to port %d: %s\n", port, strerror(errno));
+        close(connection_socket);
         return -1;
     }
 
-    fprintf(net_log_stream, "Bound net tcp socket (%s) to %d", (async) ? "async" : "blocking", port);
+    fprintf(net_log_stream, "Bound net tcp socket (%s) to %d\n", (async) ? "async" : "blocking", port);
 
     if (out_conn)
     {
@@ -340,7 +337,7 @@ network_create_tcp_bound_socket(TCP_Connection* out_conn, unsigned short port, i
 Net_Status
 network_connect_tcp(TCP_Connection* conn, struct sockaddr_in* addr)
 {
-    if (connect(conn->socket, addr, sizeof(struct sockaddr_in)) != 0) 
+    if (connect(conn->socket, (struct sockaddr*)addr, sizeof(struct sockaddr_in)) != 0) 
     {
         Net_Status result = NETWORK_OK;
         switch(errno)
@@ -360,13 +357,13 @@ network_connect_tcp(TCP_Connection* conn, struct sockaddr_in* addr)
             case EINPROGRESS:
             case EAGAIN:    result = NETWORK_PACKET_NONE;
             default: {
-                fprintf(net_log_stream, "Failed to connect to server: %s", strerror(errno));
+                fprintf(net_log_stream, "Failed to connect to server: %s\n", strerror(errno));
                 return NETWORK_ERROR;
             };
         }
         return -1;
     }
-    conn->server_addr = *addr;
+    conn->addr = *addr;
     return 0;
 }
 
@@ -384,8 +381,7 @@ network_send_tcp_packet(TCP_Connection* tcp_conn, const char* data, int length)
             case EBADF:       return NETWORK_UNINITIALIZED;
             case ECONNRESET:  return NETWORK_CONN_RESET_BY_PEER;
             case EINVAL:      return NETWORK_INVALID_ADDRESS;
-            case EWOULDBLOCK:
-            case EAGAIN:      return NETWORK_PACKET_NONE;
+            case EWOULDBLOCK: return NETWORK_PACKET_NONE;
             default: return NETWORK_PACKET_ERROR;
         }
     }
@@ -412,12 +408,11 @@ network_receive_tcp_packets(TCP_Connection* tcp_conn, TCP_Packet* out_packet)
             case EBADF:        return NETWORK_UNINITIALIZED;
             case ECONNREFUSED: return NETWORK_CONN_REFUSED;
             case EINVAL:       return NETWORK_INVALID_ADDRESS;
-            case EWOULDBLOCK:
-            case EAGAIN:       return NETWORK_PACKET_NONE;
+            case EWOULDBLOCK:  return NETWORK_PACKET_NONE;
 
             // Errors that should not happen
             default: {
-                fprintf(net_log_stream, "Unexpected error code receiving packet %s: ", strerror(errno));
+                fprintf(net_log_stream, "Unexpected error code receiving packet %s\n", strerror(errno));
                 return NETWORK_PACKET_ERROR;
             }
         }
@@ -444,7 +439,7 @@ network_listen(TCP_Connection* tcp_conn, int count)
             case EBADF: result = NETWORK_UNINITIALIZED;
             case EADDRINUSE: result = NETWORK_ADDR_IN_USE;
             default: {
-                fprintf(net_log_stream, "Failed to listen for connection: %s", strerror(errno));
+                fprintf(net_log_stream, "Failed to listen for connection: %s\n", strerror(errno));
                 return NETWORK_ERROR;
             } break;
         }
@@ -455,10 +450,11 @@ network_listen(TCP_Connection* tcp_conn, int count)
 }
 
 Net_Status
-network_accept(TCP_Connection* tcp_conn, struct sockaddr_in* connected, SOCKET* new_socket)
+network_accept(TCP_Connection* tcp_conn, TCP_Connection* new_conn)
 {
     int len = sizeof(struct sockaddr_in);
-    if (accept(tcp_conn->socket, connected, &len) == -1) {
+    new_conn->socket = accept(tcp_conn->socket, (struct sockaddr*)&new_conn->addr, &len);
+    if (new_conn->socket == -1) {
         Net_Status result = NETWORK_PACKET_NONE;
         switch(errno)
         {
@@ -468,10 +464,9 @@ network_accept(TCP_Connection* tcp_conn, struct sockaddr_in* connected, SOCKET* 
             case EPERM:        return NETWORK_ACCESS_DENIED;
             case ECONNABORTED: return NETWORK_CONN_REFUSED;
             case EINVAL:       return NETWORK_NOT_LISTENING;
-            case EWOULDBLOCK:
-            case EAGAIN:       return NETWORK_PACKET_NONE;
+            case EWOULDBLOCK:  return NETWORK_PACKET_NONE;
             default: {
-                fprintf(net_log_stream, "Failed to accept connection: %s", strerror(errno));
+                fprintf(net_log_stream, "Failed to accept connection: %s\n", strerror(errno));
                 return NETWORK_ERROR;
             };
         }            
